@@ -1,0 +1,17 @@
+db:
+    password: ENC[AES256_GCM,data:rPn38KONLRVHkyE97g==,iv:x7/xtBupHpXqH0eSB2C8JdDQ3dLzaolmJmmwTSOB7qQ=,tag:hacPbKEnMtrdZfQtozkxGw==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBIbHRid2NScUZBT01oVXRn
+            L0duRE5jWitxQ2NkVk1KR3hXK3NnL3ZrUmljClZtNHNQaWFQK2dMdEw4eDBHY09X
+            NXBDckpJek5WTnZFMDdPT2tHVWNwdFUKLS0tIGtORzlXZlhWVWVNc3FkbmNFWXBw
+            djB5L2JKeWRjWVI5ODNQa3dsMGdlR0EKO8a/OBLCtIhGnboSGeYHfuZaIq3r1h/o
+            Joq/55j77MmFni5nO9gszDnXneZ4eZyLMMEgYfDk6hDTuszz2WLzHw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1x9jss50jddenz98zr5xdxhvt9uhazjkuz4wp3dlyara4mky9wqnsw8kdh4
+    lastmodified: "2026-10-18T15:35:28Z"
+    mac: ENC[AES256_GCM,data:jAlRQv8MGdomPcTgicpcEt7jW+YVqKMPM9YfSr7xVc8ZMMUU+y205KaZ59KuEKnSpjH+Z2DzBhFLRcBXLIhCme8Sq/M8ZNfGZUBXIyPaGpYQNz7+sbItijYDeF96sByNid9q6Kma1oQ54sYqfikHAUEiARPXDQrXhKnh/JNmW3M=,iv:GQgpRqMKCV24Np8qzzJsurdt/b1gA1vRiyoeoldfG1Q=,tag:TkOtMg+K8FThssE+jvZZ0Q==,type:str]
+    unencrypted_suffix: _unencrypted
+    version: 3.13.3
