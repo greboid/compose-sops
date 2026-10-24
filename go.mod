@@ -6,7 +6,7 @@ require (
 	filippo.io/age v1.3.1
 	github.com/getsops/sops/v3 v3.13.3
 	github.com/varlink/go v0.4.0
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
