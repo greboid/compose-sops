@@ -97,6 +97,29 @@ Notes:
 - Rotation: generate a new key, re-encrypt the document, re-run `cred`,
   restart the unit.
 
+## Orchestration commands
+
+These read nothing from the runtime environment beyond `--key-file`
+(default `/run/compose-sops/age-key.txt`). `INPUT` may be `-` for stdin.
+
+```sh
+compose-sops recipient [--key-file PATH]
+compose-sops check [--key-file PATH] INPUT
+compose-sops check [--key-file PATH] --project NAME --service NAME --runtime-dir DIR [--owner-uid N --owner-gid N] INPUT
+compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
+```
+
+- `recipient` prints the `age1...` recipient of each identity in the key file.
+- `check` decrypts and verifies the document and prints `valid`. With the
+  runtime options, it compares the result against the published files and prints
+  `absent`, `unchanged` or `changed`, where `changed` means `up` would refuse.
+  It never writes.
+- `rekey` writes the document to stdout with recipients added or removed. Adding
+  wraps the existing data key for each new recipient. Removing rotates the data key
+  and re-encrypts every value. If the recipients already match, the input is
+  copied unchanged and the key file is not read. Only documents with a single key
+  group are supported.
+
 ## Security limits
 
 - tmpfs can swap: require disabled or encrypted swap.

@@ -74,6 +74,21 @@ func run() int {
 			return fail(stderr, err)
 		}
 		return cli.ExitSuccess
+	case "recipient":
+		if err := cli.RunRecipient(cmd, stdout); err != nil {
+			return fail(stderr, err)
+		}
+		return cli.ExitSuccess
+	case "check":
+		if err := cli.RunCheck(cmd, stdout, os.Stdin); err != nil {
+			return fail(stderr, err)
+		}
+		return cli.ExitSuccess
+	case "rekey":
+		if err := cli.RunRekey(cmd, stdout, os.Stdin); err != nil {
+			return fail(stderr, err)
+		}
+		return cli.ExitSuccess
 	case "setup":
 		if err := cli.RunSetup(cli.SetupOptions{In: os.Stdin, Out: stdout, Err: stderr}); err != nil {
 			return fail(stderr, err)

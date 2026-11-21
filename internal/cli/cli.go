@@ -10,6 +10,9 @@
 //	compose-sops unit [--name NAME] [--output PATH] PATH.cred
 //	compose-sops encrypt --output PATH [--key-file PATH] INPUT
 //	compose-sops install [--path PATH]
+//	compose-sops recipient [--key-file PATH]
+//	compose-sops check [--key-file PATH] [--project NAME --service NAME --runtime-dir DIR [--owner-uid N --owner-gid N]] INPUT
+//	compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
 //	compose-sops setup
 package cli
 
@@ -56,6 +59,15 @@ Host key management (systemd-creds):
       SOPS-encrypt a flat secrets YAML file with an age key
   compose-sops install [--path PATH]
       install the binary to a global path
+  compose-sops recipient [--key-file PATH]
+      print the age recipient of each identity in the key file
+  compose-sops check [--key-file PATH] INPUT
+      decrypt and verify INPUT ('-' for stdin) and print "valid"; with
+      --project, --service and --runtime-dir (and the owner options), print
+      whether the published secrets are "absent", "unchanged" or "changed"
+  compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
+      write INPUT ('-' for stdin) to stdout with the age recipients added or
+      removed; removing rotates the data key; unchanged input is copied
 
 Compose provider options:
   --file PATH          SOPS-encrypted YAML file (up only; required)
@@ -78,16 +90,19 @@ type Command struct {
 	Options     Options
 
 	// Host tooling command inputs, resolved to their defaults by Parse.
-	OutputPath     string // keygen --output, unit --output
-	CredPath       string // cred OUTPUT.cred
-	KeyPath        string // cred --key
-	WithKey        string // cred --with-key
-	CredName       string // cred/unit --name
-	UnitCredPath   string // unit PATH.cred
-	EncryptInput   string // encrypt INPUT
-	EncryptOutput  string // encrypt --output
-	EncryptKeyFile string // encrypt --key-file
-	InstallPath    string // install --path
+	OutputPath     string   // keygen --output, unit --output
+	CredPath       string   // cred OUTPUT.cred
+	KeyPath        string   // cred --key
+	WithKey        string   // cred --with-key
+	CredName       string   // cred/unit --name
+	UnitCredPath   string   // unit PATH.cred
+	EncryptInput   string   // encrypt INPUT
+	EncryptOutput  string   // encrypt --output
+	EncryptKeyFile string   // encrypt --key-file
+	InstallPath    string   // install --path
+	Input          string   // check/rekey INPUT
+	Add            []string // rekey --add
+	Remove         []string // rekey --remove
 }
 
 // Options carries parsed option values.
@@ -136,7 +151,7 @@ func parseCommand(args []string) (*Command, error) {
 			positional = append(positional, args[i+1:]...)
 			break
 		}
-		if !strings.HasPrefix(arg, "-") {
+		if arg == "-" || !strings.HasPrefix(arg, "-") {
 			positional = append(positional, arg)
 			continue
 		}
@@ -144,7 +159,8 @@ func parseCommand(args []string) (*Command, error) {
 		switch name {
 		case "--help", "-h":
 			return nil, fmt.Errorf("usage requested")
-		case "--output", "--key", "--with-key", "--name", "--key-file", "--path":
+		case "--output", "--key", "--with-key", "--name", "--key-file", "--path",
+			"--add", "--remove", "--project", "--service", "--runtime-dir", "--owner-uid", "--owner-gid":
 			if !hasValue {
 				i++
 				if i >= len(args) {
@@ -162,7 +178,7 @@ func parseCommand(args []string) (*Command, error) {
 	}
 
 	if len(positional) == 0 {
-		return nil, fmt.Errorf("missing command (setup, keygen, cred, unit, encrypt, install, or compose)")
+		return nil, fmt.Errorf("missing command (setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, or compose)")
 	}
 	cmd.Name, positional = positional[0], positional[1:]
 
@@ -187,6 +203,14 @@ func parseCommand(args []string) (*Command, error) {
 			cmd.EncryptKeyFile = value
 		case "--path":
 			cmd.InstallPath = value
+		case "--add":
+			cmd.Add = splitList(value)
+		case "--remove":
+			cmd.Remove = splitList(value)
+		case "--project":
+			cmd.ProjectName = value
+		case "--service":
+			cmd.Service = value
 		}
 	}
 
@@ -231,8 +255,49 @@ func parseCommand(args []string) (*Command, error) {
 		if len(positional) > 0 {
 			return nil, fmt.Errorf("install takes no arguments (use --path PATH for the destination)")
 		}
+	case "recipient":
+		if len(positional) > 0 {
+			return nil, fmt.Errorf("recipient takes no arguments (use --key-file PATH)")
+		}
+	case "check":
+		if len(positional) != 1 {
+			return nil, fmt.Errorf("exactly one INPUT argument is required ('-' for stdin)")
+		}
+		cmd.Input = positional[0]
+		compare := 0
+		for _, f := range []string{"--project", "--service", "--runtime-dir"} {
+			if _, ok := seen[f]; ok {
+				compare++
+			}
+		}
+		if compare != 0 && compare != 3 {
+			return nil, fmt.Errorf("--project, --service and --runtime-dir must be given together")
+		}
+		if err := applyOptions(&cmd.Options, seen, "check"); err != nil {
+			return nil, err
+		}
+		if compare == 0 && cmd.Options.OwnerUID != nil {
+			return nil, fmt.Errorf("owner options require --runtime-dir")
+		}
+	case "rekey":
+		if len(positional) != 1 {
+			return nil, fmt.Errorf("exactly one INPUT argument is required ('-' for stdin)")
+		}
+		cmd.Input = positional[0]
 	default:
-		return nil, fmt.Errorf("unknown command %q (expected setup, keygen, cred, unit, encrypt, install, or compose)", cmd.Name)
+		return nil, fmt.Errorf("unknown command %q (expected setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, or compose)", cmd.Name)
+	}
+	for name := range seen {
+		switch name {
+		case "--add", "--remove":
+			if cmd.Name != "rekey" {
+				return nil, fmt.Errorf("%s is only valid for rekey", name)
+			}
+		case "--project", "--service", "--runtime-dir", "--owner-uid", "--owner-gid":
+			if cmd.Name != "check" {
+				return nil, fmt.Errorf("%s is only valid for check", name)
+			}
+		}
 	}
 	return &cmd, nil
 }
@@ -388,6 +453,16 @@ func parseID(flag, value string) (int, error) {
 		return 0, fmt.Errorf("%s must be a non-negative integer, got %q", flag, value)
 	}
 	return n, nil
+}
+
+func splitList(value string) []string {
+	var out []string
+	for v := range strings.SplitSeq(value, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func cutFlag(arg string) (name, value string, hasValue bool) {

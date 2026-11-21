@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/greboid/compose-sops/internal/provider"
 	"github.com/greboid/compose-sops/internal/sops"
 	"github.com/greboid/compose-sops/internal/system"
 )
@@ -120,3 +121,97 @@ func RunInstall(cmd *Command, stdout io.Writer) error {
 
 // maxKeyFileSize bounds the plaintext key read before sealing.
 const maxKeyFileSize = 1 << 20 // 1 MiB
+
+// readInput reads a check or rekey INPUT, with "-" meaning stdin.
+func readInput(path string, stdin io.Reader) ([]byte, error) {
+	if path != "-" {
+		return system.ReadFileBounded(path, provider.MaxEncryptedFileSize)
+	}
+	raw, err := io.ReadAll(io.LimitReader(stdin, provider.MaxEncryptedFileSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("cannot read stdin: %w", err)
+	}
+	if len(raw) > provider.MaxEncryptedFileSize {
+		return nil, fmt.Errorf("stdin exceeds the %d byte limit", provider.MaxEncryptedFileSize)
+	}
+	return raw, nil
+}
+
+// RunRecipient implements `compose-sops recipient`.
+func RunRecipient(cmd *Command, stdout io.Writer) error {
+	ids, err := sops.LoadIdentities(cmd.EncryptKeyFile)
+	if err != nil {
+		return err
+	}
+	for _, r := range sops.IdentityRecipients(ids) {
+		fmt.Fprintln(stdout, r)
+	}
+	return nil
+}
+
+// RunCheck implements `compose-sops check`. It never publishes or removes files.
+func RunCheck(cmd *Command, stdout io.Writer, stdin io.Reader) error {
+	encrypted, err := readInput(cmd.Input, stdin)
+	if err != nil {
+		return fmt.Errorf("cannot read encrypted file: %w", err)
+	}
+	ids, err := sops.LoadIdentities(cmd.EncryptKeyFile)
+	if err != nil {
+		return err
+	}
+	secrets, err := sops.NewDecryptor(ids, sops.DefaultLimits).DecryptYAML(encrypted)
+	if err != nil {
+		return err
+	}
+	if cmd.Options.RuntimeDir == "" {
+		_, err = fmt.Fprintln(stdout, "valid")
+		return err
+	}
+	if err := provider.ValidateName(cmd.ProjectName); err != nil {
+		return fmt.Errorf("project name: %w", err)
+	}
+	if err := provider.ValidateName(cmd.Service); err != nil {
+		return fmt.Errorf("service name: %w", err)
+	}
+	if _, err := os.Lstat(cmd.Options.RuntimeDir); errors.Is(err, os.ErrNotExist) {
+		_, err = fmt.Fprintln(stdout, "absent")
+		return err
+	}
+	st, err := provider.Open(cmd.Options.RuntimeDir)
+	if err != nil {
+		return err
+	}
+	uid, gid := -1, -1
+	if cmd.Options.OwnerUID != nil {
+		uid, gid = *cmd.Options.OwnerUID, *cmd.Options.OwnerGID
+	}
+	cmp, err := st.Compare(cmd.ProjectName, cmd.Service, secrets, uid, gid)
+	if err != nil {
+		return err
+	}
+	state := map[provider.State]string{provider.StateAbsent: "absent", provider.StateMatch: "unchanged", provider.StateMismatch: "changed"}[cmp.State]
+	_, err = fmt.Fprintln(stdout, state)
+	return err
+}
+
+// RunRekey implements `compose-sops rekey`. The identity is only loaded
+// when the recipients change.
+func RunRekey(cmd *Command, stdout io.Writer, stdin io.Reader) error {
+	encrypted, err := readInput(cmd.Input, stdin)
+	if err != nil {
+		return fmt.Errorf("cannot read encrypted file: %w", err)
+	}
+	out, _, err := sops.Rekey(encrypted, nil, cmd.Add, cmd.Remove, sops.DefaultLimits)
+	if errors.Is(err, sops.ErrIdentityRequired) {
+		ids, loadErr := sops.LoadIdentities(cmd.EncryptKeyFile)
+		if loadErr != nil {
+			return loadErr
+		}
+		out, _, err = sops.Rekey(encrypted, ids, cmd.Add, cmd.Remove, sops.DefaultLimits)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(out)
+	return err
+}
