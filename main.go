@@ -65,7 +65,7 @@ func run() int {
 		}
 		return cli.ExitSuccess
 	case "encrypt":
-		if err := cli.RunEncrypt(cmd, stdout); err != nil {
+		if err := cli.RunEncrypt(cmd, stdout, os.Stdin); err != nil {
 			return fail(stderr, err)
 		}
 		return cli.ExitSuccess

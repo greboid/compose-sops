@@ -90,7 +90,8 @@ Notes:
   `cred` and `unit` `--name` values must match.
 - The materialized key is root-owned `0400` on tmpfs and gone at shutdown;
   run Compose as root or adjust ownership yourself.
-- `encrypt` requires `--output`; `--key-file` defaults to
+- `encrypt` requires `--output`. `-` as INPUT reads stdin and `--output -`
+  writes stdout, so the plaintext never needs a file. `--key-file` defaults to
   `/run/compose-sops/age-key.txt`. The key file may contain native
   identities, explicit `age1...` recipient lines, or both; every document is
   sealed to all of them.

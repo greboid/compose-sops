@@ -85,9 +85,10 @@ func RunUnit(cmd *Command, stdout io.Writer) error {
 }
 
 // RunEncrypt implements `compose-sops encrypt`. It SOPS-encrypts the flat
-// plaintext YAML input with the recipients derived from the key file.
-func RunEncrypt(cmd *Command, stdout io.Writer) error {
-	plaintext, err := system.ReadFileBounded(cmd.EncryptInput, int64(sops.DefaultLimits.MaxTotalSize))
+// plaintext YAML input with the recipients derived from the key file. INPUT
+// and --output may be "-" for stdin and stdout.
+func RunEncrypt(cmd *Command, stdout io.Writer, stdin io.Reader) error {
+	plaintext, err := readBounded(cmd.EncryptInput, stdin, sops.DefaultLimits.MaxTotalSize)
 	if err != nil {
 		return fmt.Errorf("cannot read input: %w", err)
 	}
@@ -97,6 +98,10 @@ func RunEncrypt(cmd *Command, stdout io.Writer) error {
 	}
 	encrypted, err := sops.Encrypt(plaintext, cmd.EncryptInput, recipients, sops.DefaultLimits)
 	if err != nil {
+		return err
+	}
+	if cmd.EncryptOutput == "-" {
+		_, err = stdout.Write(encrypted)
 		return err
 	}
 	if err := system.ReplaceFile(cmd.EncryptOutput, encrypted, 0o600); err != nil {
@@ -123,17 +128,22 @@ func RunInstall(cmd *Command, stdout io.Writer) error {
 // maxKeyFileSize bounds the plaintext key read before sealing.
 const maxKeyFileSize = 1 << 20 // 1 MiB
 
-// readInput reads a check or rekey INPUT, with "-" meaning stdin.
+// readInput reads an encrypted INPUT, with "-" meaning stdin.
 func readInput(path string, stdin io.Reader) ([]byte, error) {
+	return readBounded(path, stdin, provider.MaxEncryptedFileSize)
+}
+
+// readBounded reads at most max bytes from path, with "-" meaning stdin.
+func readBounded(path string, stdin io.Reader, max int) ([]byte, error) {
 	if path != "-" {
-		return system.ReadFileBounded(path, provider.MaxEncryptedFileSize)
+		return system.ReadFileBounded(path, int64(max))
 	}
-	raw, err := io.ReadAll(io.LimitReader(stdin, provider.MaxEncryptedFileSize+1))
+	raw, err := io.ReadAll(io.LimitReader(stdin, int64(max)+1))
 	if err != nil {
 		return nil, fmt.Errorf("cannot read stdin: %w", err)
 	}
-	if len(raw) > provider.MaxEncryptedFileSize {
-		return nil, fmt.Errorf("stdin exceeds the %d byte limit", provider.MaxEncryptedFileSize)
+	if len(raw) > max {
+		return nil, fmt.Errorf("stdin exceeds the %d byte limit", max)
 	}
 	return raw, nil
 }

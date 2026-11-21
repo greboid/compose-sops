@@ -57,7 +57,8 @@ Host key management (systemd-creds):
   compose-sops unit [--name NAME] [--output PATH] PATH.cred
       print the systemd unit decrypting the credential to /run at boot
   compose-sops encrypt --output PATH [--key-file PATH] INPUT
-      SOPS-encrypt a flat secrets YAML file with an age key
+      SOPS-encrypt a flat secrets YAML file with an age key; INPUT and
+      PATH may be '-' for stdin and stdout
   compose-sops install [--path PATH]
       install the binary to a global path
   compose-sops recipient [--key-file PATH]

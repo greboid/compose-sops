@@ -1,12 +1,14 @@
 package cli_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/greboid/compose-sops/internal/cli"
+	"github.com/greboid/compose-sops/internal/fixtures"
 	"github.com/greboid/compose-sops/internal/sops"
 )
 
@@ -93,7 +95,7 @@ func TestRunEncryptRoundTripsThroughProviderDecrypt(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout strings.Builder
-	if err := cli.RunEncrypt(cmd, &stdout); err != nil {
+	if err := cli.RunEncrypt(cmd, &stdout, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,7 +143,37 @@ func TestRunEncryptRejectsMissingKeyFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cli.RunEncrypt(cmd, &strings.Builder{}); err == nil {
+	if err := cli.RunEncrypt(cmd, &strings.Builder{}, nil); err == nil {
 		t.Fatal("expected error for missing default key file")
+	}
+}
+
+func TestRunEncryptStdio(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "key.txt")
+	if err := os.WriteFile(keyPath, fixtures.IdentityTest(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := cli.Parse([]string{"encrypt", "--key-file", keyPath, "--output", "-", "-"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	if err := cli.RunEncrypt(cmd, &stdout, strings.NewReader("token: hunter2\n")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "hunter2") {
+		t.Fatal("ciphertext contains plaintext value")
+	}
+	identities, err := sops.LoadIdentities(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := sops.NewDecryptor(identities, sops.DefaultLimits).DecryptYAML(stdout.Bytes())
+	if err != nil || len(secrets) != 1 || secrets[0].Value != "hunter2" {
+		t.Fatal(secrets, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatal("encrypt to stdout wrote a file")
 	}
 }
