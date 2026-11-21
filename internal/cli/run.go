@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -214,4 +215,25 @@ func RunRekey(cmd *Command, stdout io.Writer, stdin io.Reader) error {
 	}
 	_, err = stdout.Write(out)
 	return err
+}
+
+// RunDecrypt implements `compose-sops decrypt`. Plaintext goes only to stdout.
+func RunDecrypt(cmd *Command, stdout io.Writer, stdin io.Reader) error {
+	encrypted, err := readInput(cmd.Input, stdin)
+	if err != nil {
+		return fmt.Errorf("cannot read encrypted file: %w", err)
+	}
+	ids, err := sops.LoadIdentities(cmd.EncryptKeyFile)
+	if err != nil {
+		return err
+	}
+	secrets, err := sops.NewDecryptor(ids, sops.DefaultLimits).DecryptYAML(encrypted)
+	if err != nil {
+		return err
+	}
+	out := make(map[string]string, len(secrets))
+	for _, s := range secrets {
+		out[s.Name] = s.Value
+	}
+	return json.NewEncoder(stdout).Encode(out)
 }

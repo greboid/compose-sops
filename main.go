@@ -89,6 +89,11 @@ func run() int {
 			return fail(stderr, err)
 		}
 		return cli.ExitSuccess
+	case "decrypt":
+		if err := cli.RunDecrypt(cmd, stdout, os.Stdin); err != nil {
+			return fail(stderr, err)
+		}
+		return cli.ExitSuccess
 	case "setup":
 		if err := cli.RunSetup(cli.SetupOptions{In: os.Stdin, Out: stdout, Err: stderr}); err != nil {
 			return fail(stderr, err)

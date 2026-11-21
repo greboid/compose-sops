@@ -107,6 +107,7 @@ compose-sops recipient [--key-file PATH]
 compose-sops check [--key-file PATH] INPUT
 compose-sops check [--key-file PATH] --project NAME --service NAME --runtime-dir DIR [--owner-uid N --owner-gid N] INPUT
 compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
+compose-sops decrypt [--key-file PATH] INPUT
 ```
 
 - `recipient` prints the `age1...` recipient of each identity in the key file.
@@ -119,6 +120,9 @@ compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
   and re-encrypts every value. If the recipients already match, the input is
   copied unchanged and the key file is not read. Only documents with a single key
   group are supported.
+- `decrypt` decrypts and verifies the document and prints its secrets to stdout
+  as a single JSON object of name → value, for orchestrators that use the values
+  themselves. Nothing is written to disk, and nothing is printed if verification fails.
 
 ## Security limits
 

@@ -13,6 +13,7 @@
 //	compose-sops recipient [--key-file PATH]
 //	compose-sops check [--key-file PATH] [--project NAME --service NAME --runtime-dir DIR [--owner-uid N --owner-gid N]] INPUT
 //	compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
+//	compose-sops decrypt [--key-file PATH] INPUT
 //	compose-sops setup
 package cli
 
@@ -68,6 +69,9 @@ Host key management (systemd-creds):
   compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
       write INPUT ('-' for stdin) to stdout with the age recipients added or
       removed; removing rotates the data key; unchanged input is copied
+  compose-sops decrypt [--key-file PATH] INPUT
+      decrypt and verify INPUT ('-' for stdin) and print its secrets to
+      stdout as a JSON object, for orchestrators that consume them directly
 
 Compose provider options:
   --file PATH          SOPS-encrypted YAML file (up only; required)
@@ -100,7 +104,7 @@ type Command struct {
 	EncryptOutput  string   // encrypt --output
 	EncryptKeyFile string   // encrypt --key-file
 	InstallPath    string   // install --path
-	Input          string   // check/rekey INPUT
+	Input          string   // check/rekey/decrypt INPUT
 	Add            []string // rekey --add
 	Remove         []string // rekey --remove
 }
@@ -178,7 +182,7 @@ func parseCommand(args []string) (*Command, error) {
 	}
 
 	if len(positional) == 0 {
-		return nil, fmt.Errorf("missing command (setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, or compose)")
+		return nil, fmt.Errorf("missing command (setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, decrypt, or compose)")
 	}
 	cmd.Name, positional = positional[0], positional[1:]
 
@@ -279,13 +283,13 @@ func parseCommand(args []string) (*Command, error) {
 		if compare == 0 && cmd.Options.OwnerUID != nil {
 			return nil, fmt.Errorf("owner options require --runtime-dir")
 		}
-	case "rekey":
+	case "rekey", "decrypt":
 		if len(positional) != 1 {
 			return nil, fmt.Errorf("exactly one INPUT argument is required ('-' for stdin)")
 		}
 		cmd.Input = positional[0]
 	default:
-		return nil, fmt.Errorf("unknown command %q (expected setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, or compose)", cmd.Name)
+		return nil, fmt.Errorf("unknown command %q (expected setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, decrypt, or compose)", cmd.Name)
 	}
 	for name := range seen {
 		switch name {

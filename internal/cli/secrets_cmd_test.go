@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +31,8 @@ func TestParseSecretCommands(t *testing.T) {
 		{"recipient", "extra"},
 		{"encrypt", "--add", "age1x", "--output", "o", "in"},
 		{"rekey", "--runtime-dir", "/r", "-"},
+		{"decrypt"},
+		{"decrypt", "--add", "age1x", "-"},
 	} {
 		if _, err := cli.Parse(args); err == nil {
 			t.Errorf("%v: expected error", args)
@@ -57,6 +61,8 @@ func run(t *testing.T, args []string, stdin []byte) (string, error) {
 		err = cli.RunCheck(cmd, &out, bytes.NewReader(stdin))
 	case "rekey":
 		err = cli.RunRekey(cmd, &out, bytes.NewReader(stdin))
+	case "decrypt":
+		err = cli.RunDecrypt(cmd, &out, bytes.NewReader(stdin))
 	}
 	return out.String(), err
 }
@@ -95,5 +101,26 @@ func TestSecretCommands(t *testing.T) {
 	}
 	if res, err := run(t, []string{"check", "--key-file", other, "-"}, []byte(out)); err != nil || res != "valid\n" {
 		t.Fatalf("added recipient cannot decrypt: %q, %v", res, err)
+	}
+}
+
+func TestDecrypt(t *testing.T) {
+	key := keyFile(t)
+	out, err := run(t, []string{"decrypt", "--key-file", key, "-"}, fixtures.ValidDocument())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(got, fixtures.ValidValues) {
+		t.Fatal("decrypted values differ from the fixture")
+	}
+	if out, err := run(t, []string{"decrypt", "--key-file", key, "-"}, fixtures.WrongKeyDocument()); err == nil || out != "" {
+		t.Fatalf("decrypt accepted a document for another key: %q", out)
+	}
+	if out, err := run(t, []string{"decrypt", "--key-file", key, "-"}, fixtures.Get("tampered-mac.age.yaml")); err == nil || out != "" {
+		t.Fatalf("decrypt accepted a tampered document: %q", out)
 	}
 }
