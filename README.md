@@ -125,6 +125,13 @@ compose-sops decrypt [--key-file PATH] INPUT
   as a single JSON object of name → value, for orchestrators that use the values
   themselves. Nothing is written to disk, and nothing is printed if verification fails.
 
+### Go library
+
+Package `github.com/greboid/compose-sops/secrets` runs `recipient`, `check` and
+`rekey` in process, with the same validation as the commands: `Recipients`,
+`Check`, `Compare` (the runtime form of `check`) and `Rekey`. Publishing stays
+with the provider executable that Compose runs.
+
 ## Security limits
 
 - tmpfs can swap: require disabled or encrypted swap.
