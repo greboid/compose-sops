@@ -18,7 +18,7 @@ import (
 	sopsdecrypt "github.com/getsops/sops/v3/decrypt"
 	sopsyaml "github.com/getsops/sops/v3/stores/yaml"
 	sopsversion "github.com/getsops/sops/v3/version"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 
 	"github.com/greboid/compose-sops/internal/sops"
 )

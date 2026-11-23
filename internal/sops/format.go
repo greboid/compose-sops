@@ -23,7 +23,7 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/armor"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 const (
