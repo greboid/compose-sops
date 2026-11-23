@@ -1,0 +1,5 @@
+go test fuzz v1
+string("k")
+string("\t\r\n")
+string("k2")
+string("ype:str]")

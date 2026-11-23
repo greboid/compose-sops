@@ -184,7 +184,7 @@ func RunSetup(opts SetupOptions) error {
 		if err != nil {
 			return err
 		}
-		encrypted, err := sops.Encrypt(plaintext, inputPath, recipients, sops.DefaultLimits)
+		encrypted, err := sops.Encrypt(plaintext, recipients, sops.DefaultLimits)
 		if err != nil {
 			return fmt.Errorf("encrypt: %w", err)
 		}

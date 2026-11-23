@@ -32,7 +32,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	}
 
 	plaintext := "db_password: hunter2\ntoken: \"line1\\nline2\"\n"
-	encrypted, err := sops.Encrypt([]byte(plaintext), "secrets.yaml", recipients, sops.DefaultLimits)
+	encrypted, err := sops.Encrypt([]byte(plaintext), recipients, sops.DefaultLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestEncryptRejectsAlreadyEncrypted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = sops.Encrypt([]byte("sops:\n  version: 3\n"), "in.yaml", recipients, sops.DefaultLimits)
+	_, err = sops.Encrypt([]byte("sops:\n  version: 3\n"), recipients, sops.DefaultLimits)
 	if err == nil {
 		t.Fatal("expected error for input containing sops metadata key")
 	}
@@ -84,7 +84,7 @@ func TestEncryptRejectsNonFlatDocuments(t *testing.T) {
 		"integer":  "count: 5\n",
 	}
 	for name, doc := range cases {
-		if _, err := sops.Encrypt([]byte(doc), "in.yaml", recipients, sops.DefaultLimits); err == nil {
+		if _, err := sops.Encrypt([]byte(doc), recipients, sops.DefaultLimits); err == nil {
 			t.Fatalf("%s: expected rejection", name)
 		}
 	}

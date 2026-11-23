@@ -10,14 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+
+	"os"
 	"strings"
 
 	"filippo.io/age"
 
-	sopsage "github.com/getsops/sops/v3/age"
-
 	"github.com/greboid/compose-sops/internal/system"
-	"os"
 )
 
 // maxIdentityFileSize bounds the identity file read.
@@ -38,9 +37,8 @@ func IsSanitized(err error) bool {
 	return errors.As(err, &s)
 }
 
-// LoadIdentities parses the age identity file at path and returns SOPS age
-// identities
-// suitable for ApplyToMasterKey injection.
+// LoadIdentities parses the age identity file at path and returns its age
+// identities.
 //
 // Rejected before parsing:
 //   - lines beginning with AGE-PLUGIN- (would require an external plugin)
@@ -49,7 +47,7 @@ func IsSanitized(err error) bool {
 //
 // Blank lines and # comments are ignored. At least one X25519 identity
 // (AGE-SECRET-KEY-...) must remain.
-func LoadIdentities(path string) (sopsage.ParsedIdentities, error) {
+func LoadIdentities(path string) ([]age.Identity, error) {
 	raw, err := system.ReadFileBounded(path, maxIdentityFileSize)
 	if err != nil {
 		return nil, sanitized("cannot read age key file: " + readMessage(path, err))
@@ -73,7 +71,7 @@ func LoadIdentities(path string) (sopsage.ParsedIdentities, error) {
 	if len(ids) == 0 {
 		return nil, sanitized("age key file contains no identities")
 	}
-	return sopsage.ParsedIdentities(ids), nil
+	return ids, nil
 }
 
 // Recipients parses the age key file at path and returns the age public keys

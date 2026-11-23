@@ -1,18 +1,11 @@
 package sops
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
 	"filippo.io/age"
-	"github.com/getsops/sops/v3"
-	"github.com/getsops/sops/v3/aes"
-	sopsage "github.com/getsops/sops/v3/age"
-	"github.com/getsops/sops/v3/keyservice"
-	yaml "github.com/greboid/compose-sops/internal/yamlstore"
 )
 
 // ErrIdentityRequired is returned by Rekey without identities when the
@@ -22,26 +15,20 @@ var ErrIdentityRequired = errors.New("an age identity is required to change reci
 // Rekey adds the recipients in add and removes those in remove. Adding
 // wraps the existing data key for the new recipients; removing rotates the
 // data key and re-encrypts every value so removed keys cannot read later
-// revisions. It returns the input unchanged, and false, when the recipient
-// set already matches.
-func Rekey(encrypted []byte, identities sopsage.ParsedIdentities, add, remove []string, limits Limits) ([]byte, bool, error) {
+// revisions. The document is decrypted and its MAC verified before either.
+// It returns the input unchanged, and false, when the recipient set already
+// matches.
+func Rekey(encrypted []byte, identities []age.Identity, add, remove []string, limits Limits) ([]byte, bool, error) {
 	for _, r := range slices.Concat(add, remove) {
 		if _, err := age.ParseX25519Recipient(r); err != nil {
 			return nil, false, fmt.Errorf("invalid age recipient %q", r)
 		}
 	}
-	store := yaml.NewStore()
-	tree, err := store.LoadEncryptedFile(encrypted)
+	d, err := parseEncrypted(encrypted)
 	if err != nil {
-		return nil, false, fmt.Errorf("not a valid SOPS-encrypted YAML document (%d bytes)", len(encrypted))
+		return nil, false, err
 	}
-	if len(tree.Metadata.KeyGroups) != 1 || !onlyAgeKeys(tree.Metadata.KeyGroups) {
-		return nil, false, fmt.Errorf("rekey supports documents with one key group of age recipients only")
-	}
-	var have []string
-	for _, k := range tree.Metadata.KeyGroups[0] {
-		have = append(have, k.(*sopsage.MasterKey).Recipient)
-	}
+	have := d.meta.recipients()
 	var missing []string
 	for _, r := range add {
 		if !slices.Contains(have, r) && !slices.Contains(missing, r) && !slices.Contains(remove, r) {
@@ -56,80 +43,54 @@ func Rekey(encrypted []byte, identities sopsage.ParsedIdentities, add, remove []
 		return nil, false, ErrIdentityRequired
 	}
 
-	dataKey, err := tree.Metadata.GetDataKeyWithKeyServices(
-		[]keyservice.KeyServiceClient{keyservice.NewCustomLocalClient(identityKeyService{identities: identities})},
-		nil,
-	)
+	dataKey, err := d.unwrap(identities)
 	if err != nil {
 		return nil, false, fmt.Errorf("data key recovery failed: no identity in the key file can decrypt this document")
 	}
+	values, err := d.open(dataKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := ValidateFlat(d.secrets(values), limits); err != nil {
+		return nil, false, fmt.Errorf("decrypted document rejected: %s", err)
+	}
 
 	if !drop {
-		for _, r := range missing {
-			k := &sopsage.MasterKey{Recipient: r}
-			if err := k.Encrypt(dataKey); err != nil {
-				return nil, false, fmt.Errorf("cannot encrypt data key for an age recipient: %w", err)
-			}
-			tree.Metadata.KeyGroups[0] = append(tree.Metadata.KeyGroups[0], k)
-		}
-	} else {
-		cipher := aes.NewCipher()
-		mac, err := tree.Decrypt(dataKey, cipher)
+		stanzas, err := wrapDataKeyFor(dataKey, missing)
 		if err != nil {
-			return nil, false, fmt.Errorf("decryption failed: an encrypted value could not be decrypted with the recovered data key")
+			return nil, false, err
 		}
-		stored, err := cipher.Decrypt(tree.Metadata.MessageAuthenticationCode, dataKey, tree.Metadata.LastModified.Format(time.RFC3339))
-		if err != nil || stored != mac {
-			return nil, false, fmt.Errorf("integrity check failed: MAC mismatch, the document was modified after encryption or is corrupted")
-		}
-		if _, err := ValidateFlat(tree.Branches, limits); err != nil {
-			return nil, false, fmt.Errorf("decrypted document rejected: %s", err)
-		}
+		d.meta.age = append(d.meta.age, stanzas...)
+	} else {
 		keep := slices.DeleteFunc(slices.Concat(have, missing), func(r string) bool { return slices.Contains(remove, r) })
 		if len(keep) == 0 {
 			return nil, false, fmt.Errorf("removing every recipient would leave the document undecryptable")
 		}
-		if err := reencrypt(&tree, keep); err != nil {
+		newKey, err := newDataKey()
+		if err != nil {
 			return nil, false, err
 		}
+		stanzas, err := wrapDataKeyFor(newKey, keep)
+		if err != nil {
+			return nil, false, err
+		}
+		if err := reencryptComments(d.root, dataKey, newKey); err != nil {
+			return nil, false, err
+		}
+		if err := d.seal(newKey, values); err != nil {
+			return nil, false, err
+		}
+		d.meta.age = stanzas
 	}
-	out, err := store.EmitEncryptedFile(tree)
+	out, err := d.emit()
 	if err != nil {
-		return nil, false, fmt.Errorf("cannot serialize encrypted document: %w", err)
+		return nil, false, err
 	}
 	return out, true, nil
 }
 
-// reencrypt encrypts a decrypted tree with a new data key for recipients.
-func reencrypt(tree *sops.Tree, recipients []string) error {
-	group := make(sops.KeyGroup, 0, len(recipients))
-	dataKey := make([]byte, 32)
-	if _, err := rand.Read(dataKey); err != nil {
-		return fmt.Errorf("cannot generate data key: %w", err)
-	}
-	for _, r := range recipients {
-		k := &sopsage.MasterKey{Recipient: r}
-		if err := k.Encrypt(dataKey); err != nil {
-			return fmt.Errorf("cannot encrypt data key for an age recipient: %w", err)
-		}
-		group = append(group, k)
-	}
-	tree.Metadata.KeyGroups = []sops.KeyGroup{group}
-	cipher := aes.NewCipher()
-	mac, err := tree.Encrypt(dataKey, cipher)
-	if err != nil {
-		return fmt.Errorf("cannot encrypt document values: %w", err)
-	}
-	tree.Metadata.LastModified = time.Now().UTC()
-	tree.Metadata.MessageAuthenticationCode, err = cipher.Encrypt(mac, dataKey, tree.Metadata.LastModified.Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("cannot encrypt document MAC: %w", err)
-	}
-	return nil
-}
-
 // IdentityRecipients returns the public key of each identity.
-func IdentityRecipients(identities sopsage.ParsedIdentities) []string {
+func IdentityRecipients(identities []age.Identity) []string {
 	var out []string
 	for _, id := range identities {
 		if x, ok := id.(*age.X25519Identity); ok {

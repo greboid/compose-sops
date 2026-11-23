@@ -43,6 +43,10 @@ $ compose-sops compose --project-name NAME down --runtime-dir DIR SERVICE
 - The document must be a flat mapping of secret name → string. Duplicate
   keys, nesting, non-string scalars, NUL bytes, invalid names, and oversized
   values are rejected. Values are preserved exactly, with no added newlines.
+- Only one group of age recipients and the default `unencrypted_suffix`
+  rule are supported; other SOPS metadata options and key types are
+  rejected. `encrypt` refuses names ending in `_unencrypted`, which SOPS
+  would store in plaintext.
 - Repeated `up` with unchanged secrets is a no-op (inodes preserved). Changed
   secrets fail and require `down` + `up`, since bind mounts keep the old
   inode. Provisioning is atomic (private staging + rename), serialized per

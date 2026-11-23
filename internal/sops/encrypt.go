@@ -1,26 +1,12 @@
-// Encrypt produces SOPS-encrypted YAML documents for the compose-sops
-// document model from the same flat name→string mapping the provider
-// decrypts. Encryption happens in-process with the SOPS and age libraries:
-// no external executables, no ambient key discovery.
-
 package sops
 
 import (
-	"crypto/rand"
 	"fmt"
-	"time"
+	"strings"
 
 	"filippo.io/age"
-	"github.com/getsops/sops/v3"
-	"github.com/getsops/sops/v3/aes"
-	sopsage "github.com/getsops/sops/v3/age"
-	sopsversion "github.com/getsops/sops/v3/version"
-	yaml "github.com/greboid/compose-sops/internal/yamlstore"
+	"go.yaml.in/yaml/v3"
 )
-
-// sopsMetadataKey is the top-level key SOPS uses in emitted documents; its
-// presence in input marks an already-encrypted file.
-const sopsMetadataKey = "sops"
 
 // Encrypt validates the plaintext flat YAML document, encrypts every value
 // with a fresh random data key, and wraps the data key for each given
@@ -28,82 +14,56 @@ const sopsMetadataKey = "sops"
 // sops CLI and by the compose-sops provider.
 //
 // The input must be exactly one flat mapping of secret names to string
-// values; anything else is rejected before encryption.
-func Encrypt(plaintext []byte, filePath string, recipients []*age.X25519Recipient, limits Limits) ([]byte, error) {
+// values; anything else is rejected before encryption. Comments are dropped.
+func Encrypt(plaintext []byte, recipients []*age.X25519Recipient, limits Limits) ([]byte, error) {
 	if len(recipients) == 0 {
 		return nil, fmt.Errorf("no age recipients given")
 	}
-	store := yaml.NewStore()
-	branches, err := store.LoadPlainFile(plaintext)
-	if err != nil {
-		return nil, fmt.Errorf("not a valid YAML document")
-	}
-	if len(branches) == 1 && hasSopsTopLevelKey(branches[0]) {
-		return nil, fmt.Errorf("input already contains a %q top-level key and appears to be SOPS-encrypted", sopsMetadataKey)
-	}
-	secrets, err := ValidateFlat(branches, limits)
+	root, err := parseYAML(plaintext)
 	if err != nil {
 		return nil, fmt.Errorf("plaintext rejected: %s", err)
 	}
-
-	// Rebuild the branch from validated secrets so output is normalized
-	// regardless of YAML input quirks, preserving document order.
-	branch := make(sops.TreeBranch, 0, len(secrets))
-	for _, secret := range secrets {
-		branch = append(branch, sops.TreeItem{Key: secret.Name, Value: secret.Value})
+	entries, _, err := flatEntries(root.Content[0], false, "")
+	if err != nil {
+		return nil, fmt.Errorf("plaintext rejected: %s", err)
 	}
-
-	group := make(sops.KeyGroup, 0, len(recipients))
-	for _, recipient := range recipients {
-		group = append(group, &sopsage.MasterKey{Recipient: recipient.String()})
+	secrets := make([]Secret, len(entries))
+	values := make([]string, len(entries))
+	body := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	d := &document{
+		root:   &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{body}},
+		body:   body,
+		sopsAt: -1,
+		meta:   metadata{suffix: defaultUnencryptedSuffix},
 	}
-	tree := sops.Tree{
-		Branches: sops.TreeBranches{branch},
-		Metadata: sops.Metadata{
-			Version:   sopsversion.Version,
-			KeyGroups: []sops.KeyGroup{group},
-		},
-		FilePath: filePath,
-	}
-
-	// A single key group means every master key wraps the whole data key;
-	// master keys for age encrypt in-process without key services.
-	dataKey := make([]byte, 32)
-	if _, err := rand.Read(dataKey); err != nil {
-		return nil, fmt.Errorf("cannot generate data key: %w", err)
-	}
-	for _, key := range group {
-		if err := key.(*sopsage.MasterKey).Encrypt(dataKey); err != nil {
-			return nil, fmt.Errorf("cannot encrypt data key for an age recipient: %w", err)
+	for i, e := range entries {
+		if strings.HasSuffix(e.name, defaultUnencryptedSuffix) {
+			return nil, fmt.Errorf("plaintext rejected: secret %q ends with %q, which SOPS leaves unencrypted", e.name, defaultUnencryptedSuffix)
 		}
+		secrets[i] = Secret{Name: e.name, Value: e.value.Value}
+		values[i] = e.value.Value
+		key := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: e.name}
+		value := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str"}
+		body.Content = append(body.Content, key, value)
+		d.entries = append(d.entries, entry{name: e.name, value: value})
+	}
+	if err := ValidateFlat(secrets, limits); err != nil {
+		return nil, fmt.Errorf("plaintext rejected: %s", err)
 	}
 
-	// Mirror the sops CLI flow: encrypt values in place, compute the MAC
-	// over the plaintext, then store the MAC encrypted alongside the
-	// document.
-	cipher := aes.NewCipher()
-	mac, err := tree.Encrypt(dataKey, cipher)
+	dataKey, err := newDataKey()
 	if err != nil {
-		return nil, fmt.Errorf("cannot encrypt document values: %w", err)
+		return nil, err
 	}
-	tree.Metadata.LastModified = time.Now().UTC()
-	tree.Metadata.MessageAuthenticationCode, err = cipher.Encrypt(mac, dataKey, tree.Metadata.LastModified.Format(time.RFC3339))
-	if err != nil {
-		return nil, fmt.Errorf("cannot encrypt document MAC: %w", err)
+	names := make([]string, len(recipients))
+	for i, r := range recipients {
+		names[i] = r.String()
 	}
-
-	encrypted, err := store.EmitEncryptedFile(tree)
-	if err != nil {
-		return nil, fmt.Errorf("cannot serialize encrypted document: %w", err)
+	if d.meta.age, err = wrapDataKeyFor(dataKey, names); err != nil {
+		return nil, err
 	}
-	return encrypted, nil
-}
-
-func hasSopsTopLevelKey(branch sops.TreeBranch) bool {
-	for _, item := range branch {
-		if key, ok := item.Key.(string); ok && key == sopsMetadataKey {
-			return true
-		}
+	if err := d.seal(dataKey, values); err != nil {
+		return nil, err
 	}
-	return false
+	return d.emit()
 }

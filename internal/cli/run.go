@@ -97,7 +97,7 @@ func RunEncrypt(cmd *Command, stdout io.Writer, stdin io.Reader) error {
 	if err != nil {
 		return err
 	}
-	encrypted, err := sops.Encrypt(plaintext, cmd.EncryptInput, recipients, sops.DefaultLimits)
+	encrypted, err := sops.Encrypt(plaintext, recipients, sops.DefaultLimits)
 	if err != nil {
 		return err
 	}

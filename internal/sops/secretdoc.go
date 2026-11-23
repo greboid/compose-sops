@@ -7,11 +7,9 @@
 package sops
 
 import (
-	"bytes"
 	"fmt"
 	"regexp"
-
-	"github.com/getsops/sops/v3"
+	"strings"
 )
 
 // Limits bound the decrypted document.
@@ -40,82 +38,39 @@ type Secret struct {
 // the name is always a single safe path component.
 var namePattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$`)
 
-// ValidateFlat converts decrypted SOPS tree branches into an ordered flat
-// secret list. It rejects multi-document input, nested values, non-string
-// scalars, duplicate keys, invalid names, NUL bytes, and size overruns.
+// ValidateFlat checks an ordered flat secret list: at least one entry,
+// valid and unique names, no NUL bytes, and size limits.
 //
 // Error messages are safe to surface: they may name secret keys (which are
 // already visible in the encrypted file) but never quote values.
-func ValidateFlat(branches sops.TreeBranches, limits Limits) ([]Secret, error) {
-	if len(branches) != 1 {
-		return nil, fmt.Errorf("expected exactly one YAML document, got %d", len(branches))
-	}
-	branch := branches[0]
-	if len(branch) == 0 {
-		return nil, fmt.Errorf("document contains no secrets")
-	}
-
-	seen := make(map[string]struct{}, len(branch))
-	secrets := make([]Secret, 0, len(branch))
-	total := 0
-
-	for _, item := range branch {
-		if _, ok := item.Key.(sops.Comment); ok {
-			// Comments carry no secret material; skip them.
-			continue
-		}
-		key, ok := item.Key.(string)
-		if !ok {
-			return nil, fmt.Errorf("secret name must be a string, got %T", item.Key)
-		}
-		if !namePattern.MatchString(key) {
-			return nil, fmt.Errorf("invalid secret name %q: must match [a-zA-Z0-9_][a-zA-Z0-9._-]* and be at most 128 characters", key)
-		}
-		if _, dup := seen[key]; dup {
-			return nil, fmt.Errorf("duplicate secret name %q", key)
-		}
-		seen[key] = struct{}{}
-
-		if _, isComment := item.Value.(sops.Comment); isComment {
-			return nil, fmt.Errorf("secret %q has a comment where a string value was expected", key)
-		}
-		value, ok := item.Value.(string)
-		if !ok {
-			return nil, fmt.Errorf("secret %q has a %s value; all values must be YAML strings (quote the value)", key, typeName(item.Value))
-		}
-		if bytes.ContainsRune([]byte(value), 0) {
-			return nil, fmt.Errorf("secret %q contains a NUL byte", key)
-		}
-		if len(value) > limits.MaxValueSize {
-			return nil, fmt.Errorf("secret %q is %d bytes, exceeding the %d byte limit", key, len(value), limits.MaxValueSize)
-		}
-		total += len(key) + len(value)
-		if total > limits.MaxTotalSize {
-			return nil, fmt.Errorf("document exceeds the %d byte total size limit", limits.MaxTotalSize)
-		}
-		secrets = append(secrets, Secret{Name: key, Value: value})
-	}
+func ValidateFlat(secrets []Secret, limits Limits) error {
 	if len(secrets) == 0 {
-		return nil, fmt.Errorf("document contains no secrets")
+		return fmt.Errorf("document contains no secrets")
 	}
-	return secrets, nil
+	seen := make(map[string]struct{}, len(secrets))
+	total := 0
+	for _, s := range secrets {
+		if !namePattern.MatchString(s.Name) {
+			return invalidName(s.Name)
+		}
+		if _, dup := seen[s.Name]; dup {
+			return fmt.Errorf("duplicate secret name %q", s.Name)
+		}
+		seen[s.Name] = struct{}{}
+		if strings.ContainsRune(s.Value, 0) {
+			return fmt.Errorf("secret %q contains a NUL byte", s.Name)
+		}
+		if len(s.Value) > limits.MaxValueSize {
+			return fmt.Errorf("secret %q is %d bytes, exceeding the %d byte limit", s.Name, len(s.Value), limits.MaxValueSize)
+		}
+		total += len(s.Name) + len(s.Value)
+		if total > limits.MaxTotalSize {
+			return fmt.Errorf("document exceeds the %d byte total size limit", limits.MaxTotalSize)
+		}
+	}
+	return nil
 }
 
-func typeName(v any) string {
-	switch v.(type) {
-	case nil:
-		return "null"
-	case int:
-		return "integer"
-	case float64:
-		return "float"
-	case bool:
-		return "boolean"
-	case sops.TreeBranch:
-		return "nested mapping"
-	case []any:
-		return "sequence"
-	default:
-		return fmt.Sprintf("%T", v)
-	}
+func invalidName(name string) error {
+	return fmt.Errorf("invalid secret name %q: must match [a-zA-Z0-9_][a-zA-Z0-9._-]* and be at most 128 characters", name)
 }
