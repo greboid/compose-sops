@@ -107,6 +107,32 @@ func Rekey(keyFile string, encrypted []byte, add, remove []string) ([]byte, erro
 	return out, err
 }
 
+// Decrypt returns the secrets in encrypted, by name.
+func Decrypt(keyFile string, encrypted []byte) (map[string]string, error) {
+	secrets, err := decrypt(keyFile, encrypted)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(secrets))
+	for _, s := range secrets {
+		out[s.Name] = s.Value
+	}
+	return out, nil
+}
+
+// Encrypt encrypts the flat plaintext YAML document to the recipients of the
+// identities and recipient lines in keyFile.
+func Encrypt(keyFile string, plaintext []byte) ([]byte, error) {
+	if max := sops.DefaultLimits.MaxTotalSize; len(plaintext) > max {
+		return nil, fmt.Errorf("plaintext exceeds the %d byte limit", max)
+	}
+	recipients, err := sops.Recipients(keyFile)
+	if err != nil {
+		return nil, err
+	}
+	return sops.Encrypt(plaintext, recipients, sops.DefaultLimits)
+}
+
 func decrypt(keyFile string, encrypted []byte) ([]sops.Secret, error) {
 	if err := checkSize(encrypted); err != nil {
 		return nil, err

@@ -93,11 +93,7 @@ func RunEncrypt(cmd *Command, stdout io.Writer, stdin io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("cannot read input: %w", err)
 	}
-	recipients, err := sops.Recipients(cmd.EncryptKeyFile)
-	if err != nil {
-		return err
-	}
-	encrypted, err := sops.Encrypt(plaintext, recipients, sops.DefaultLimits)
+	encrypted, err := secrets.Encrypt(cmd.EncryptKeyFile, plaintext)
 	if err != nil {
 		return err
 	}
@@ -206,17 +202,9 @@ func RunDecrypt(cmd *Command, stdout io.Writer, stdin io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("cannot read encrypted file: %w", err)
 	}
-	ids, err := sops.LoadIdentities(cmd.EncryptKeyFile)
+	out, err := secrets.Decrypt(cmd.EncryptKeyFile, encrypted)
 	if err != nil {
 		return err
-	}
-	secrets, err := sops.NewDecryptor(ids, sops.DefaultLimits).DecryptYAML(encrypted)
-	if err != nil {
-		return err
-	}
-	out := make(map[string]string, len(secrets))
-	for _, s := range secrets {
-		out[s.Name] = s.Value
 	}
 	return json.NewEncoder(stdout).Encode(out)
 }

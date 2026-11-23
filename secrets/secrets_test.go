@@ -163,3 +163,39 @@ func tmpfsDir(t *testing.T) string {
 	t.Skip("no tmpfs directory available")
 	return ""
 }
+
+func TestEncryptDecrypt(t *testing.T) {
+	key := writeKey(t, fixtures.IdentityTest())
+	got, err := Decrypt(key, fixtures.ValidDocument())
+	if err != nil || len(got) != len(fixtures.ValidValues) {
+		t.Fatal(got, err)
+	}
+	for k, v := range fixtures.ValidValues {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+	// A key file of recipient lines encrypts without being able to decrypt.
+	recipients := writeKey(t, []byte(recipient(t, key)+"\n"))
+	doc, err := Encrypt(recipients, []byte("a: one\nb: \"two \"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decrypt(recipients, doc); err == nil {
+		t.Fatal("decrypted with recipients only")
+	}
+	if got, err := Decrypt(key, doc); err != nil || len(got) != 2 || got["a"] != "one" || got["b"] != "two " {
+		t.Fatal(got, err)
+	}
+	for name, plain := range map[string][]byte{
+		"nested":    []byte("a: {b: c}\n"),
+		"oversized": bytes.Repeat([]byte("x"), sops.DefaultLimits.MaxTotalSize+1),
+	} {
+		if _, err := Encrypt(key, plain); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if _, err := Decrypt(writeKey(t, fixtures.IdentityWrong()), fixtures.ValidDocument()); err == nil {
+		t.Fatal("decrypted with the wrong key")
+	}
+}

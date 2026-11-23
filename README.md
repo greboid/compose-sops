@@ -131,10 +131,11 @@ compose-sops decrypt [--key-file PATH] INPUT
 
 ### Go library
 
-Package `github.com/greboid/compose-sops/secrets` runs `recipient`, `check` and
-`rekey` in process, with the same validation as the commands: `Recipients`,
-`Check`, `Compare` (the runtime form of `check`) and `Rekey`. Publishing stays
-with the provider executable that Compose runs.
+Package `github.com/greboid/compose-sops/secrets` runs `recipient`, `check`,
+`rekey`, `encrypt` and `decrypt` in process, with the same validation as the
+commands: `Recipients`, `Check`, `Compare` (the runtime form of `check`),
+`Rekey`, `Encrypt` and `Decrypt`. Publishing stays with the provider executable
+that Compose runs.
 
 ## Security limits
 
