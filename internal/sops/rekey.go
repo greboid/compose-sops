@@ -11,9 +11,8 @@ import (
 	"github.com/getsops/sops/v3"
 	"github.com/getsops/sops/v3/aes"
 	sopsage "github.com/getsops/sops/v3/age"
-	"github.com/getsops/sops/v3/config"
 	"github.com/getsops/sops/v3/keyservice"
-	"github.com/getsops/sops/v3/stores/yaml"
+	yaml "github.com/greboid/compose-sops/internal/yamlstore"
 )
 
 // ErrIdentityRequired is returned by Rekey without identities when the
@@ -31,7 +30,7 @@ func Rekey(encrypted []byte, identities sopsage.ParsedIdentities, add, remove []
 			return nil, false, fmt.Errorf("invalid age recipient %q", r)
 		}
 	}
-	store := yaml.NewStore(&config.YAMLStoreConfig{})
+	store := yaml.NewStore()
 	tree, err := store.LoadEncryptedFile(encrypted)
 	if err != nil {
 		return nil, false, fmt.Errorf("not a valid SOPS-encrypted YAML document (%d bytes)", len(encrypted))

@@ -14,9 +14,8 @@ import (
 	"github.com/getsops/sops/v3"
 	"github.com/getsops/sops/v3/aes"
 	sopsage "github.com/getsops/sops/v3/age"
-	"github.com/getsops/sops/v3/config"
-	"github.com/getsops/sops/v3/stores/yaml"
 	sopsversion "github.com/getsops/sops/v3/version"
+	yaml "github.com/greboid/compose-sops/internal/yamlstore"
 )
 
 // sopsMetadataKey is the top-level key SOPS uses in emitted documents; its
@@ -34,7 +33,7 @@ func Encrypt(plaintext []byte, filePath string, recipients []*age.X25519Recipien
 	if len(recipients) == 0 {
 		return nil, fmt.Errorf("no age recipients given")
 	}
-	store := yaml.NewStore(&config.YAMLStoreConfig{})
+	store := yaml.NewStore()
 	branches, err := store.LoadPlainFile(plaintext)
 	if err != nil {
 		return nil, fmt.Errorf("not a valid YAML document")

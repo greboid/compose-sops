@@ -12,9 +12,8 @@ import (
 	"github.com/getsops/sops/v3"
 	"github.com/getsops/sops/v3/aes"
 	sopsage "github.com/getsops/sops/v3/age"
-	"github.com/getsops/sops/v3/config"
 	"github.com/getsops/sops/v3/keyservice"
-	"github.com/getsops/sops/v3/stores/yaml"
+	yaml "github.com/greboid/compose-sops/internal/yamlstore"
 )
 
 // Decryptor decrypts SOPS documents on behalf of the provider, which
@@ -33,7 +32,7 @@ func NewDecryptor(identities sopsage.ParsedIdentities, limits Limits) *Decryptor
 // integrity, and returns the validated flat secret mapping in document
 // order. No plaintext is logged or echoed in errors.
 func (s *Decryptor) DecryptYAML(encrypted []byte) ([]Secret, error) {
-	store := yaml.NewStore(&config.YAMLStoreConfig{})
+	store := yaml.NewStore()
 	tree, err := store.LoadEncryptedFile(encrypted)
 	if err != nil {
 		// Parse errors can quote document content; sanitize.
