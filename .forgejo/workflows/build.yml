@@ -1,5 +1,7 @@
 name: build
 
+enable-openid-connect: true
+
 on:
   workflow_dispatch:
   push:
@@ -30,9 +32,7 @@ jobs:
         run: plugin/build.sh dist
       - uses: actions/toolkit/docker-login@master
         with:
-          registry: git.mouse-lake.ts.net
-          username: ${{ secrets.REGISTRY_USER }}
-          password: ${{ secrets.REGISTRY_PASS }}
+          audience: u:1:4f4cf699-68d9-42df-bf4a-cde3e743783f
       - name: Push
         run: |
           set -eu
