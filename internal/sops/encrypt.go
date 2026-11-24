@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"filippo.io/age"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Encrypt validates the plaintext flat YAML document, encrypts every value
