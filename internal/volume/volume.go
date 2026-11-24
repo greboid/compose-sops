@@ -439,6 +439,15 @@ func (d *Driver) publish(name string, rec *record) (err error) {
 			return err
 		}
 	}
+	// The consumer may need to list the directory (e.g. secret-env discovery).
+	if rec.UID != nil {
+		if err := os.Chown(mp, *rec.UID, *rec.GID); err != nil {
+			return fmt.Errorf("cannot set volume ownership: %w", err)
+		}
+	}
+	if err := os.Chmod(mp, 0o500); err != nil {
+		return fmt.Errorf("cannot set volume mode: %w", err)
+	}
 	return d.cfg.Mounter.Seal(mp)
 }
 

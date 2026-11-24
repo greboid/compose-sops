@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/greboid/compose-sops/internal/fixtures"
@@ -38,6 +39,7 @@ func (f *fakeMounter) Mount(dir string, size, inodes int) error {
 func (f *fakeMounter) Seal(dir string) error { f.sealed[dir] = true; return nil }
 
 func (f *fakeMounter) Unmount(dir string) error {
+	_ = os.Chmod(dir, 0o700)
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		os.RemoveAll(filepath.Join(dir, e.Name()))
@@ -65,6 +67,11 @@ func newEnv(t *testing.T) *env {
 		MountRoot: filepath.Join(base, "mnt"),
 	}}
 	e.cfg.Mounter = e.m
+	t.Cleanup(func() {
+		for dir := range e.m.mounted {
+			_ = e.m.Unmount(dir)
+		}
+	})
 	for _, d := range []string{e.cfg.Documents, e.cfg.StateDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
@@ -227,6 +234,9 @@ func TestMountLifecycle(t *testing.T) {
 	}
 	if mp != filepath.Join(e.cfg.MountRoot, "v") || !e.m.mounted[mp] || !e.m.sealed[mp] {
 		t.Fatalf("mountpoint %s mounted=%v sealed=%v", mp, e.m.mounted[mp], e.m.sealed[mp])
+	}
+	if info, err := os.Stat(mp); err != nil || info.Mode().Perm() != 0o500 || info.Sys().(*syscall.Stat_t).Uid != uint32(uid) {
+		t.Fatalf("volume root %v, %v", info.Mode(), err)
 	}
 	got := readDir(t, mp)
 	if len(got) != 2 || got["db_password"] != fixtures.ValidValues["db_password"] || got["multiline"] != fixtures.ValidValues["multiline"] {

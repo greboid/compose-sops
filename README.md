@@ -76,7 +76,8 @@ image content into the read-only volume.
   selected key. Only the options are persisted, never the document contents.
 - The first active mount reads the current document, decrypts it, mounts a
   size-limited tmpfs (`noswap` where the kernel supports it, Linux 6.4+),
-  writes the selected secrets as `0400` files (directory `0711`) and
+  writes the selected secrets as `0400` files (directory `0500`, both owned
+  by `uid`/`gid`) and
   remounts it read-only. The last unmount removes the tmpfs.
 - Mounting fails, and the container does not start, if the document or key
   is unavailable or does not verify.

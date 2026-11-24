@@ -21,7 +21,7 @@ type Tmpfs struct{}
 // Mount mounts a tmpfs at dir, excluded from swap where the kernel supports
 // it (Linux 6.4+).
 func (Tmpfs) Mount(dir string, size, inodes int) error {
-	data := fmt.Sprintf("mode=0711,size=%d,nr_inodes=%d", size, inodes)
+	data := fmt.Sprintf("mode=0700,size=%d,nr_inodes=%d", size, inodes)
 	err := unix.Mount("tmpfs", dir, "tmpfs", tmpfsFlags, data+",noswap")
 	if errors.Is(err, unix.EINVAL) {
 		err = unix.Mount("tmpfs", dir, "tmpfs", tmpfsFlags, data)
