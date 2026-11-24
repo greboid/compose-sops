@@ -1,6 +1,6 @@
-// Command compose-sops is a Compose provider that materializes a
-// SOPS-encrypted YAML file as individual secret files on host tmpfs, plus
-// host tooling for systemd-creds-based key management.
+// Command compose-sops is a Docker volume plugin that publishes
+// SOPS-encrypted YAML documents as secret files on tmpfs, plus host tooling
+// for systemd-creds-based key management.
 package main
 
 import (
@@ -12,7 +12,6 @@ import (
 	"syscall"
 
 	"github.com/greboid/compose-sops/internal/cli"
-	"github.com/greboid/compose-sops/internal/provider"
 )
 
 func main() {
@@ -20,16 +19,8 @@ func main() {
 }
 
 func run() int {
-	// Graceful cancellation: staging cleanup runs through defers on the
-	// first signal; a second signal kills the process immediately.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sig
-		cancel()
-	}()
 
 	cmd, err := cli.Parse(os.Args[1:])
 	if err != nil {
@@ -40,15 +31,12 @@ func run() int {
 	stdout := os.Stdout
 	stderr := os.Stderr
 
-	if cmd.Name == "metadata" {
-		if err := cli.RunMetadata(stdout); err != nil {
-			fmt.Fprintf(stderr, "compose-sops: %s\n", err)
-			return cli.ExitFailure
+	switch cmd.Name {
+	case "plugin":
+		if err := cli.RunPlugin(ctx, cmd, stdout); err != nil {
+			return fail(stderr, err)
 		}
 		return cli.ExitSuccess
-	}
-
-	switch cmd.Name {
 	case "keygen":
 		if err := cli.RunKeygen(cmd, stdout, stderr, os.Stdin); err != nil {
 			return fail(stderr, err)
@@ -101,36 +89,7 @@ func run() int {
 		return cli.ExitSuccess
 	}
 
-	emit := provider.NewEmitter(stdout)
-
-	p := provider.New(nil, nil, emit)
-	opts := provider.Options{
-		File:       cmd.Options.File,
-		AgeKeyFile: cmd.Options.AgeKeyFile,
-		RuntimeDir: cmd.Options.RuntimeDir,
-		OwnerUID:   cmd.Options.OwnerUID,
-		OwnerGID:   cmd.Options.OwnerGID,
-	}
-
-	var runErr error
-	switch cmd.Name {
-	case "up":
-		runErr = p.Up(cmd.ProjectName, cmd.Service, opts)
-	case "down":
-		runErr = p.Down(cmd.ProjectName, cmd.Service, opts)
-	case "stop":
-		runErr = p.Stop(cmd.ProjectName, cmd.Service, opts)
-	}
-	if ctx.Err() != nil && runErr == nil {
-		runErr = fmt.Errorf("interrupted")
-	}
-
-	if runErr != nil {
-		emit.Error(runErr.Error())
-		fmt.Fprintf(stderr, "compose-sops: %s\n", runErr.Error())
-		return cli.ExitFailure
-	}
-	return cli.ExitSuccess
+	return fail(stderr, fmt.Errorf("unhandled command %q", cmd.Name))
 }
 
 func fail(stderr io.Writer, err error) int {

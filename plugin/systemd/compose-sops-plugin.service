@@ -1,0 +1,14 @@
+[Unit]
+Description=Install the compose-sops Docker volume plugin
+Documentation=https://git.mouse-lake.ts.net/greboid/compose-sops
+Requires=docker.service
+After=docker.service compose-sops-key.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/compose-sops/plugin.env
+ExecStart=/usr/libexec/compose-sops-plugin-install /usr/lib/compose-sops/plugin
+
+[Install]
+WantedBy=docker.service

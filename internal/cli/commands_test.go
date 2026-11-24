@@ -142,18 +142,8 @@ func TestParseHostCommandErrors(t *testing.T) {
 	}
 }
 
-func TestParseComposeStillWorks(t *testing.T) {
-	cmd, err := cli.Parse([]string{"compose", "metadata"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cmd.Name != "metadata" {
-		t.Fatalf("name = %s", cmd.Name)
-	}
-}
-
 func TestUsageMentionsHostCommands(t *testing.T) {
-	for _, want := range []string{"keygen", "cred", "unit", "encrypt", "install", "setup"} {
+	for _, want := range []string{"plugin", "keygen", "cred", "unit", "encrypt", "install", "setup"} {
 		if !strings.Contains(cli.UsageText(), want) {
 			t.Fatalf("usage missing %q", want)
 		}

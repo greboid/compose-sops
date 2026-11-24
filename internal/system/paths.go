@@ -16,8 +16,8 @@ const (
 	CredName = "compose-sops-key"
 	// RuntimeKey is where the generated systemd unit materializes the
 	// decrypted age identity on tmpfs at boot. It is the default key file
-	// for encrypt and the value to pass as the Compose provider's
-	// age-key-file option.
+	// for the commands taking --key-file, and the plugin reads it from the
+	// same path through its key mount.
 	RuntimeKey = "/run/compose-sops/age-key.txt"
 	// RuntimeDir is the tmpfs directory the generated unit owns through
 	// RuntimeDirectory=.
@@ -26,4 +26,16 @@ const (
 	Unit = "/etc/systemd/system/compose-sops-key.service"
 	// Install is the default global installation path of the binary itself.
 	Install = "/usr/local/bin/compose-sops"
+)
+
+// Locations inside the managed plugin, matching plugin/config.json.
+const (
+	// PluginSocket is the volume driver socket Docker connects to.
+	PluginSocket = "/run/docker/plugins/compose-sops.sock"
+	// PluginDocuments is where the host documents root is mounted.
+	PluginDocuments = "/documents"
+	// PluginState is where the host state directory is mounted.
+	PluginState = "/state"
+	// PluginMountRoot is the plugin's propagated mount.
+	PluginMountRoot = "/mnt/volumes"
 )

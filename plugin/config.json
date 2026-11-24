@@ -1,0 +1,54 @@
+{
+  "description": "SOPS-encrypted secrets as read-only tmpfs volumes",
+  "documentation": "https://git.mouse-lake.ts.net/greboid/compose-sops",
+  "entrypoint": ["/usr/bin/compose-sops", "plugin"],
+  "workdir": "/",
+  "interface": {
+    "types": ["docker.volumedriver/1.0"],
+    "socket": "compose-sops.sock"
+  },
+  "network": {
+    "type": "none"
+  },
+  "propagatedMount": "/mnt/volumes",
+  "linux": {
+    "capabilities": ["CAP_SYS_ADMIN"]
+  },
+  "env": [
+    {
+      "name": "COMPOSE_SOPS_BUILD",
+      "description": "Build identifier set by install.sh",
+      "value": "",
+      "settable": ["value"]
+    }
+  ],
+  "mounts": [
+    {
+      "name": "documents",
+      "description": "Host directory that volume file options are relative to",
+      "source": "/srv",
+      "destination": "/documents",
+      "type": "bind",
+      "options": ["rbind", "ro"],
+      "settable": ["source"]
+    },
+    {
+      "name": "key",
+      "description": "Host directory holding age-key.txt",
+      "source": "/run/compose-sops",
+      "destination": "/run/compose-sops",
+      "type": "bind",
+      "options": ["rbind", "ro"],
+      "settable": ["source"]
+    },
+    {
+      "name": "state",
+      "description": "Host directory persisting volume options",
+      "source": "/var/lib/compose-sops",
+      "destination": "/state",
+      "type": "bind",
+      "options": ["rbind"],
+      "settable": ["source"]
+    }
+  ]
+}

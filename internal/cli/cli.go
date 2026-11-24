@@ -1,27 +1,20 @@
-// Package cli parses the compose-sops command line and dispatches to the
-// Compose provider lifecycle commands and the host key management commands:
+// Package cli parses the compose-sops command line:
 //
-//	compose-sops compose metadata
-//	compose-sops compose --project-name NAME up [options] SERVICE
-//	compose-sops compose --project-name NAME down [options] SERVICE
-//	compose-sops compose --project-name NAME stop [options] SERVICE
+//	compose-sops plugin [--socket PATH] [--documents DIR] [--key-file PATH] [--state DIR] [--mount-root DIR]
 //	compose-sops keygen [--output PATH]
 //	compose-sops cred [--key PATH] [--with-key KEY] [--name NAME] PATH.cred
 //	compose-sops unit [--name NAME] [--output PATH] PATH.cred
 //	compose-sops encrypt --output PATH [--key-file PATH] INPUT
 //	compose-sops install [--path PATH]
 //	compose-sops recipient [--key-file PATH]
-//	compose-sops check [--key-file PATH] [--project NAME --service NAME --runtime-dir DIR [--owner-uid N --owner-gid N]] INPUT
+//	compose-sops check [--key-file PATH] INPUT
 //	compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
 //	compose-sops decrypt [--key-file PATH] INPUT
 //	compose-sops setup
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"strconv"
 	"strings"
 
 	"github.com/greboid/compose-sops/internal/system"
@@ -31,19 +24,18 @@ import (
 const (
 	// ExitSuccess is the zero exit code.
 	ExitSuccess = 0
-	// ExitFailure is a provider/runtime failure (Compose marks the service failed).
+	// ExitFailure is a runtime failure.
 	ExitFailure = 1
 	// ExitUsage is a command line error.
 	ExitUsage = 2
 )
 
-const usage = `compose-sops - SOPS-encrypted file secrets provider for Docker Compose
+const usage = `compose-sops - SOPS-encrypted secrets as Docker volumes
 
-Compose provider (invoked by Docker Compose, not by hand):
-  compose-sops compose metadata
-  compose-sops compose --project-name NAME up    [options] SERVICE
-  compose-sops compose --project-name NAME down  [options] SERVICE
-  compose-sops compose --project-name NAME stop  [options] SERVICE
+Docker volume plugin (run by Docker inside the managed plugin):
+  compose-sops plugin [--socket PATH] [--documents DIR] [--key-file PATH]
+                      [--state DIR] [--mount-root DIR]
+      serve the volume driver API; defaults match plugin/config.json
 
 Host key management (systemd-creds):
   compose-sops setup
@@ -64,9 +56,7 @@ Host key management (systemd-creds):
   compose-sops recipient [--key-file PATH]
       print the age recipient of each identity in the key file
   compose-sops check [--key-file PATH] INPUT
-      decrypt and verify INPUT ('-' for stdin) and print "valid"; with
-      --project, --service and --runtime-dir (and the owner options), print
-      whether the published secrets are "absent", "unchanged" or "changed"
+      decrypt and verify INPUT ('-' for stdin) and print "valid"
   compose-sops rekey [--key-file PATH] [--add R,...] [--remove R,...] INPUT
       write INPUT ('-' for stdin) to stdout with the age recipients added or
       removed; removing rotates the data key; unchanged input is copied
@@ -74,25 +64,15 @@ Host key management (systemd-creds):
       decrypt and verify INPUT ('-' for stdin) and print its secrets to
       stdout as a JSON object, for orchestrators that consume them directly
 
-Compose provider options:
-  --file PATH          SOPS-encrypted YAML file (up only; required)
-  --age-key-file PATH  host age identity file, native AGE-SECRET-KEY-1...
-                       identities only (up only; required)
-  --runtime-dir PATH   existing tmpfs directory for the published secrets
-                       (required)
-  --owner-uid N        numeric UID owning the secret files (optional)
-  --owner-gid N        numeric GID owning the secret files (optional)
-
-Secrets are published to <runtime-dir>/<project>/<SERVICE>/<secret-name>.
-Secret values are never emitted as provider messages or logs.
+Volume driver options (docker volume create -o / Compose driver_opts):
+  file=PATH   encrypted document, relative to the documents root (required)
+  keys=A,B    expose only these secrets (default: all)
+  uid=N,gid=N owner of the secret files (default: root)
 `
 
 // Command is a parsed invocation.
 type Command struct {
-	Name        string // metadata, up, down, stop, keygen, cred, unit, encrypt, install, setup
-	ProjectName string
-	Service     string
-	Options     Options
+	Name string
 
 	// Host tooling command inputs, resolved to their defaults by Parse.
 	OutputPath     string   // keygen --output, unit --output
@@ -103,48 +83,25 @@ type Command struct {
 	UnitCredPath   string   // unit PATH.cred
 	EncryptInput   string   // encrypt INPUT
 	EncryptOutput  string   // encrypt --output
-	EncryptKeyFile string   // encrypt --key-file
+	EncryptKeyFile string   // --key-file
 	InstallPath    string   // install --path
 	Input          string   // check/rekey/decrypt INPUT
 	Add            []string // rekey --add
 	Remove         []string // rekey --remove
-}
 
-// Options carries parsed option values.
-type Options struct {
-	File       string
-	AgeKeyFile string
-	RuntimeDir string
-	OwnerUID   *int
-	OwnerGID   *int
-}
-
-// flagSpec describes one option flag.
-type flagSpec struct {
-	name  string
-	typ   string
-	reqUp bool
-}
-
-// optionSpecs is the single source of truth for parsing and metadata output.
-var optionSpecs = []flagSpec{
-	{name: "file", typ: "string", reqUp: true},
-	{name: "age-key-file", typ: "string", reqUp: true},
-	{name: "runtime-dir", typ: "string", reqUp: true},
-	{name: "owner-uid", typ: "integer", reqUp: false},
-	{name: "owner-gid", typ: "integer", reqUp: false},
+	// Plugin locations.
+	Socket    string // plugin --socket
+	Documents string // plugin --documents
+	StateDir  string // plugin --state
+	MountRoot string // plugin --mount-root
 }
 
 // Parse parses args (without the program name).
 func Parse(args []string) (*Command, error) {
-	if len(args) > 0 && args[0] == "compose" {
-		return parseCompose(args)
-	}
 	return parseCommand(args)
 }
 
-// parseCommand parses the host tooling commands (everything except the
-// Compose provider's 'compose' subcommand).
+// parseCommand parses every command.
 func parseCommand(args []string) (*Command, error) {
 	var cmd Command
 	var positional []string
@@ -165,7 +122,7 @@ func parseCommand(args []string) (*Command, error) {
 		case "--help", "-h":
 			return nil, fmt.Errorf("usage requested")
 		case "--output", "--key", "--with-key", "--name", "--key-file", "--path",
-			"--add", "--remove", "--project", "--service", "--runtime-dir", "--owner-uid", "--owner-gid":
+			"--add", "--remove", "--socket", "--documents", "--state", "--mount-root":
 			if !hasValue {
 				i++
 				if i >= len(args) {
@@ -183,7 +140,7 @@ func parseCommand(args []string) (*Command, error) {
 	}
 
 	if len(positional) == 0 {
-		return nil, fmt.Errorf("missing command (setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, decrypt, or compose)")
+		return nil, fmt.Errorf("missing command (plugin, setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, decrypt)")
 	}
 	cmd.Name, positional = positional[0], positional[1:]
 
@@ -193,6 +150,10 @@ func parseCommand(args []string) (*Command, error) {
 	cmd.CredName = system.CredName
 	cmd.EncryptKeyFile = system.RuntimeKey
 	cmd.InstallPath = system.Install
+	cmd.Socket = system.PluginSocket
+	cmd.Documents = system.PluginDocuments
+	cmd.StateDir = system.PluginState
+	cmd.MountRoot = system.PluginMountRoot
 
 	for name, value := range seen {
 		switch name {
@@ -212,14 +173,22 @@ func parseCommand(args []string) (*Command, error) {
 			cmd.Add = splitList(value)
 		case "--remove":
 			cmd.Remove = splitList(value)
-		case "--project":
-			cmd.ProjectName = value
-		case "--service":
-			cmd.Service = value
+		case "--socket":
+			cmd.Socket = value
+		case "--documents":
+			cmd.Documents = value
+		case "--state":
+			cmd.StateDir = value
+		case "--mount-root":
+			cmd.MountRoot = value
 		}
 	}
 
 	switch cmd.Name {
+	case "plugin":
+		if len(positional) > 0 {
+			return nil, fmt.Errorf("plugin takes no arguments")
+		}
 	case "setup":
 		if len(positional) > 0 || len(seen) > 0 {
 			return nil, fmt.Errorf("setup takes no arguments or flags")
@@ -269,28 +238,13 @@ func parseCommand(args []string) (*Command, error) {
 			return nil, fmt.Errorf("exactly one INPUT argument is required ('-' for stdin)")
 		}
 		cmd.Input = positional[0]
-		compare := 0
-		for _, f := range []string{"--project", "--service", "--runtime-dir"} {
-			if _, ok := seen[f]; ok {
-				compare++
-			}
-		}
-		if compare != 0 && compare != 3 {
-			return nil, fmt.Errorf("--project, --service and --runtime-dir must be given together")
-		}
-		if err := applyOptions(&cmd.Options, seen, "check"); err != nil {
-			return nil, err
-		}
-		if compare == 0 && cmd.Options.OwnerUID != nil {
-			return nil, fmt.Errorf("owner options require --runtime-dir")
-		}
 	case "rekey", "decrypt":
 		if len(positional) != 1 {
 			return nil, fmt.Errorf("exactly one INPUT argument is required ('-' for stdin)")
 		}
 		cmd.Input = positional[0]
 	default:
-		return nil, fmt.Errorf("unknown command %q (expected setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, decrypt, or compose)", cmd.Name)
+		return nil, fmt.Errorf("unknown command %q (expected plugin, setup, keygen, cred, unit, encrypt, install, recipient, check, rekey, decrypt)", cmd.Name)
 	}
 	for name := range seen {
 		switch name {
@@ -298,9 +252,9 @@ func parseCommand(args []string) (*Command, error) {
 			if cmd.Name != "rekey" {
 				return nil, fmt.Errorf("%s is only valid for rekey", name)
 			}
-		case "--project", "--service", "--runtime-dir", "--owner-uid", "--owner-gid":
-			if cmd.Name != "check" {
-				return nil, fmt.Errorf("%s is only valid for check", name)
+		case "--socket", "--documents", "--state", "--mount-root":
+			if cmd.Name != "plugin" {
+				return nil, fmt.Errorf("%s is only valid for plugin", name)
 			}
 		}
 	}
@@ -324,142 +278,6 @@ func validateCredName(name string) error {
 	return nil
 }
 
-// parseCompose parses the Compose provider invocation (args[0] == "compose").
-func parseCompose(args []string) (*Command, error) {
-	if len(args) == 0 || args[0] != "compose" {
-		return nil, fmt.Errorf("first argument must be 'compose'")
-	}
-	rest := args[1:]
-
-	var cmd Command
-	var positional []string
-	seen := map[string]string{}
-
-	for i := 0; i < len(rest); i++ {
-		arg := rest[i]
-		if arg == "--" {
-			positional = append(positional, rest[i+1:]...)
-			break
-		}
-		if !strings.HasPrefix(arg, "-") {
-			positional = append(positional, arg)
-			continue
-		}
-
-		name, value, hasValue := cutFlag(arg)
-		switch name {
-		case "--project-name", "-p":
-			if !hasValue {
-				i++
-				if i >= len(rest) {
-					return nil, fmt.Errorf("--project-name requires a value")
-				}
-				value = rest[i]
-			}
-			cmd.ProjectName = value
-		case "--help", "-h":
-			return nil, fmt.Errorf("usage requested")
-		default:
-			if !isOptionFlag(name) {
-				return nil, fmt.Errorf("unknown flag %s", arg)
-			}
-			if !hasValue {
-				i++
-				if i >= len(rest) {
-					return nil, fmt.Errorf("%s requires a value", name)
-				}
-				value = rest[i]
-			}
-			if _, dup := seen[name]; dup {
-				return nil, fmt.Errorf("flag --%s given more than once", strings.TrimPrefix(name, "--"))
-			}
-			seen[name] = value
-		}
-	}
-
-	if len(positional) == 0 {
-		return nil, fmt.Errorf("missing subcommand (metadata, up, down, stop)")
-	}
-	cmd.Name, positional = positional[0], positional[1:]
-
-	switch cmd.Name {
-	case "metadata":
-		if len(positional) > 0 {
-			return nil, fmt.Errorf("metadata takes no arguments")
-		}
-		return &cmd, nil
-	case "up", "down", "stop":
-	default:
-		return nil, fmt.Errorf("unknown subcommand %q (expected metadata, up, down, stop)", cmd.Name)
-	}
-
-	if cmd.ProjectName == "" {
-		return nil, fmt.Errorf("--project-name is required")
-	}
-	if len(positional) != 1 {
-		return nil, fmt.Errorf("exactly one SERVICE argument is required")
-	}
-	cmd.Service = positional[0]
-
-	if err := applyOptions(&cmd.Options, seen, cmd.Name); err != nil {
-		return nil, err
-	}
-	return &cmd, nil
-}
-
-func isOptionFlag(name string) bool {
-	for _, spec := range optionSpecs {
-		if "--"+spec.name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func applyOptions(opts *Options, seen map[string]string, subcommand string) error {
-	for _, spec := range optionSpecs {
-		value, ok := seen["--"+spec.name]
-		if !ok {
-			if spec.reqUp && subcommand == "up" {
-				return fmt.Errorf("missing required option --%s", spec.name)
-			}
-			continue
-		}
-		switch spec.name {
-		case "file":
-			opts.File = value
-		case "age-key-file":
-			opts.AgeKeyFile = value
-		case "runtime-dir":
-			opts.RuntimeDir = value
-		case "owner-uid":
-			n, err := parseID("--owner-uid", value)
-			if err != nil {
-				return err
-			}
-			opts.OwnerUID = &n
-		case "owner-gid":
-			n, err := parseID("--owner-gid", value)
-			if err != nil {
-				return err
-			}
-			opts.OwnerGID = &n
-		}
-	}
-	if (opts.OwnerUID == nil) != (opts.OwnerGID == nil) {
-		return fmt.Errorf("--owner-uid and --owner-gid must be given together")
-	}
-	return nil
-}
-
-func parseID(flag, value string) (int, error) {
-	n, err := strconv.Atoi(value)
-	if err != nil || n < 0 || n > 2147483647 {
-		return 0, fmt.Errorf("%s must be a non-negative integer, got %q", flag, value)
-	}
-	return n, nil
-}
-
 func splitList(value string) []string {
 	var out []string
 	for v := range strings.SplitSeq(value, ",") {
@@ -475,89 +293,6 @@ func cutFlag(arg string) (name, value string, hasValue bool) {
 		return before, after, true
 	}
 	return arg, "", false
-}
-
-// metadata types mirror the JSON structure Compose expects from
-// `compose metadata`.
-type metadataParameter struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Required    bool   `json:"required"`
-	Type        string `json:"type"`
-}
-
-type metadataCommand struct {
-	Parameters []metadataParameter `json:"parameters"`
-}
-
-type metadataOutput struct {
-	Description string          `json:"description"`
-	Up          metadataCommand `json:"up"`
-	Down        metadataCommand `json:"down"`
-	Stop        metadataCommand `json:"stop"`
-}
-
-const metadataDescription = "Materializes SOPS-encrypted YAML files as individual secret files on host tmpfs for Compose file secrets"
-
-func parameterDescriptions(cmd string) []metadataParameter {
-	params := make([]metadataParameter, 0, len(optionSpecs))
-	for _, spec := range optionSpecs {
-		params = append(params, metadataParameter{
-			Name:        spec.name,
-			Description: optionDescription(spec.name, cmd),
-			Required:    requiredFor(spec, cmd),
-			Type:        spec.typ,
-		})
-	}
-	return params
-}
-
-// requiredFor mirrors the actual per-command option enforcement: up needs
-// everything, down only needs to locate the runtime dir, stop needs nothing.
-func requiredFor(spec flagSpec, cmd string) bool {
-	switch cmd {
-	case "metadata", "up":
-		return spec.reqUp
-	case "down":
-		return spec.name == "runtime-dir"
-	default:
-		return false
-	}
-}
-
-func optionDescription(name, cmd string) string {
-	switch name {
-	case "file":
-		if cmd == "up" {
-			return "Path to the SOPS-encrypted YAML file"
-		}
-		return "Path to the SOPS-encrypted YAML file (ignored by " + cmd + ")"
-	case "age-key-file":
-		if cmd == "up" {
-			return "Path to the host age identity file (native AGE-SECRET-KEY-1... identities only)"
-		}
-		return "Path to the host age identity file (ignored by " + cmd + ")"
-	case "runtime-dir":
-		return "Existing tmpfs directory under which secrets are published"
-	case "owner-uid":
-		return "Numeric UID owning the published secret files (default: invoking user)"
-	case "owner-gid":
-		return "Numeric GID owning the published secret files (default: invoking group)"
-	}
-	return ""
-}
-
-// RunMetadata writes the provider metadata JSON.
-func RunMetadata(w io.Writer) error {
-	out := metadataOutput{
-		Description: metadataDescription,
-		Up:          metadataCommand{Parameters: parameterDescriptions("up")},
-		Down:        metadataCommand{Parameters: parameterDescriptions("down")},
-		Stop:        metadataCommand{Parameters: parameterDescriptions("stop")},
-	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
 }
 
 // UsageText returns the usage message.

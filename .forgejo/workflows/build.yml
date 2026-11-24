@@ -15,3 +15,32 @@ jobs:
       - uses: actions/toolkit/git-checkout@master
       - uses: actions/toolkit/go-setup@master
       - uses: actions/toolkit/go-test@master
+
+  plugin:
+    runs-on: alpine
+    needs: [test]
+    env:
+      IMAGE: git.mouse-lake.ts.net/greboid/compose-sops
+    steps:
+      - uses: actions/toolkit/git-checkout@master
+      - uses: actions/toolkit/go-setup@master
+      - name: Install build tools
+        run: apk add --no-cache gzip jq skopeo tar
+      - name: Build
+        run: plugin/build.sh dist
+      - uses: actions/toolkit/docker-login@master
+        with:
+          registry: git.mouse-lake.ts.net
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASS }}
+      - name: Push
+        run: |
+          set -eu
+          case "$GITHUB_REF" in
+            refs/tags/v*) tags="${GITHUB_REF_NAME#v} latest" ;;
+            *) tags="dev" ;;
+          esac
+          for tag in $tags; do
+            skopeo copy --preserve-digests --authfile "$DOCKER_CONFIG/config.json" \
+              oci:dist/oci:latest "docker://$IMAGE:$tag"
+          done

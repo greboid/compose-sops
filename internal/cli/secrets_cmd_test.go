@@ -26,11 +26,10 @@ func TestParseSecretCommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"check"},
 		{"check", "--project", "p", "-"},
-		{"check", "--owner-uid", "1", "--owner-gid", "1", "-"},
 		{"rekey"},
 		{"recipient", "extra"},
 		{"encrypt", "--add", "age1x", "--output", "o", "in"},
-		{"rekey", "--runtime-dir", "/r", "-"},
+		{"rekey", "--state", "/r", "-"},
 		{"decrypt"},
 		{"decrypt", "--add", "age1x", "-"},
 	} {
@@ -79,10 +78,6 @@ func TestSecretCommands(t *testing.T) {
 	}
 	if _, err := run(t, []string{"check", "--key-file", key, "-"}, fixtures.WrongKeyDocument()); err == nil {
 		t.Fatal("check accepted a document for another key")
-	}
-	absent := filepath.Join(t.TempDir(), "missing")
-	if out, err := run(t, []string{"check", "--key-file", key, "--project", "p", "--service", "s", "--runtime-dir", absent, "-"}, doc); err != nil || out != "absent\n" {
-		t.Fatalf("check compare = %q, %v", out, err)
 	}
 	if out, err := run(t, []string{"rekey", "--add", strings.TrimSpace(recipient), "-"}, doc); err != nil || out != string(doc) {
 		t.Fatalf("unchanged rekey altered the document: %v", err)

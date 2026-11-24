@@ -15,7 +15,9 @@ func TestGenerateDefaultLayout(t *testing.T) {
 		"runtime directory mode": "RuntimeDirectoryMode=0700",
 		"umask":                  "UMask=0077",
 		"oneshot + remain":       "Type=oneshot\nRemainAfterExit=yes",
-		"install target":         "WantedBy=multi-user.target",
+		"install target":         "WantedBy=multi-user.target docker.service",
+		"before docker":          "Before=docker.service",
+		"preserved on restart":   "RuntimeDirectoryPreserve=restart",
 		"tpm setup ordering":     "After=systemd-tpm2-setup.service",
 		"documentation link":     "Documentation=man:systemd-creds(1)",
 	}

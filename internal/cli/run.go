@@ -6,14 +6,32 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"time"
 
-	"github.com/greboid/compose-sops/internal/provider"
 	"github.com/greboid/compose-sops/internal/sops"
 	"github.com/greboid/compose-sops/internal/system"
+	"github.com/greboid/compose-sops/internal/volume"
 	"github.com/greboid/compose-sops/secrets"
 )
+
+// RunPlugin implements `compose-sops plugin`: it serves the Docker volume
+// driver API until ctx is done.
+func RunPlugin(ctx context.Context, cmd *Command, logw io.Writer) error {
+	d, err := volume.New(volume.Config{
+		Documents: cmd.Documents,
+		KeyFile:   cmd.EncryptKeyFile,
+		StateDir:  cmd.StateDir,
+		MountRoot: cmd.MountRoot,
+		Mounter:   volume.Tmpfs{},
+		Log:       log.New(logw, "", 0),
+	})
+	if err != nil {
+		return err
+	}
+	return volume.Serve(ctx, cmd.Socket, volume.Handler(d))
+}
 
 // RunKeygen implements `compose-sops keygen`. It prompts for the output
 // path when --output was not given, writes a fresh age identity file, and
@@ -127,7 +145,7 @@ const maxKeyFileSize = 1 << 20 // 1 MiB
 
 // readInput reads an encrypted INPUT, with "-" meaning stdin.
 func readInput(path string, stdin io.Reader) ([]byte, error) {
-	return readBounded(path, stdin, provider.MaxEncryptedFileSize)
+	return readBounded(path, stdin, secrets.MaxDocumentSize)
 }
 
 // readBounded reads at most max bytes from path, with "-" meaning stdin.
@@ -157,28 +175,16 @@ func RunRecipient(cmd *Command, stdout io.Writer) error {
 	return nil
 }
 
-// RunCheck implements `compose-sops check`. It never publishes or removes files.
+// RunCheck implements `compose-sops check`.
 func RunCheck(cmd *Command, stdout io.Writer, stdin io.Reader) error {
 	encrypted, err := readInput(cmd.Input, stdin)
 	if err != nil {
 		return fmt.Errorf("cannot read encrypted file: %w", err)
 	}
-	if cmd.Options.RuntimeDir == "" {
-		if err := secrets.Check(cmd.EncryptKeyFile, encrypted); err != nil {
-			return err
-		}
-		_, err = fmt.Fprintln(stdout, "valid")
+	if err := secrets.Check(cmd.EncryptKeyFile, encrypted); err != nil {
 		return err
 	}
-	uid, gid := -1, -1
-	if cmd.Options.OwnerUID != nil {
-		uid, gid = *cmd.Options.OwnerUID, *cmd.Options.OwnerGID
-	}
-	state, err := secrets.Compare(cmd.EncryptKeyFile, encrypted, cmd.Options.RuntimeDir, cmd.ProjectName, cmd.Service, uid, gid)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(stdout, state)
+	_, err = fmt.Fprintln(stdout, "valid")
 	return err
 }
 

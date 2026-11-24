@@ -20,6 +20,11 @@ import (
 	"github.com/greboid/compose-sops/internal/system"
 )
 
+const (
+	pluginImage    = "git.mouse-lake.ts.net/greboid/compose-sops:latest"
+	pluginStateDir = "/var/lib/compose-sops"
+)
+
 // Runner executes host commands (systemctl); overridable in tests.
 type SetupRunner func(ctx context.Context, name string, args ...string) error
 
@@ -195,10 +200,10 @@ func RunSetup(opts SetupOptions) error {
 	}
 
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Setup complete. Provider options for your compose.yaml:")
-	fmt.Fprintf(out, "  file: %s\n", "<your secrets.sops.yaml>")
-	fmt.Fprintf(out, "  age-key-file: %s\n", runtimeKey)
-	fmt.Fprintf(out, "  runtime-dir: <an existing tmpfs directory>\n")
+	fmt.Fprintln(out, "Setup complete. Install the volume plugin with:")
+	fmt.Fprintf(out, "  install -d -m 0700 %s\n", pluginStateDir)
+	fmt.Fprintf(out, "  docker plugin install --alias compose-sops %s \\\n", pluginImage)
+	fmt.Fprintf(out, "    documents.source=<directory holding your encrypted documents> key.source=%s\n", filepath.Dir(runtimeKey))
 	return nil
 }
 

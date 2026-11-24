@@ -1,5 +1,5 @@
 // Self-installation: copies the running compose-sops binary to a global
-// location so the Compose provider can reference it by absolute path.
+// location for the host tooling commands.
 
 package system
 
